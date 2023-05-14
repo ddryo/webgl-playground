@@ -1,0 +1,6 @@
+rad, degの変換
+https://sci-pursuit.com/math/radian.html
+
+
+配置座標を角度と半径からcos,sinで計算
+https://qiita.com/FumioNonaka/items/c146420c3aeab27fc736

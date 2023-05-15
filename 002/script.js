@@ -16,6 +16,10 @@ window.addEventListener(
 	false
 );
 
+const getRadian = (deg) => {
+	return (deg * Math.PI) / 180;
+};
+
 /**
  * three.js を効率よく扱うために自家製の制御クラスを定義
  */
@@ -28,8 +32,8 @@ class App3 {
 			near: 0.1,
 			far: 50.0,
 			x: 0.0,
-			y: 10.0,
-			z: 20.0,
+			y: 15.0,
+			z: 10.0,
 			lookAt: new THREE.Vector3(0.0, 0.0, 0.0),
 		};
 	}
@@ -61,7 +65,11 @@ class App3 {
 		this.timerCash = null;
 		this.timer = 0;
 		this.timerId = null;
+
 		this.boxs = []; // BOXの配列
+		this.BOX_CT = 120; // BOXの数
+
+		this.fireLight = null; // 点光源
 
 		// 再帰呼び出しのための this 固定
 		this.render = this.render.bind(this);
@@ -114,60 +122,103 @@ class App3 {
 
 		// ディレクショナルライト（平行光源）
 		// https://threejs.org/docs/index.html?q=DirectionalLight#api/en/lights/DirectionalLight
-		const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+		const directionalLight = new THREE.DirectionalLight(0xffffff, 0.1);
 		directionalLight.position.set(0.0, 1.0, 0.0); // xyzでベクトル指定
+		this.scene.add(directionalLight);
 
 		// アンビエントライト（環境光）
-		const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-
-		// 各ライトをシーンに追加
-		this.scene.add(directionalLight);
+		const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
 		this.scene.add(ambientLight);
+
+		// 点光源
+		// https://threejs.org/docs/index.html?q=PointLight#api/en/lights/PointLight
+		// memo: 公式ドキュメントを読むと、 decay (光の減衰率) はあまり指定しないほうがよさそう？
+		this.fireLight = new THREE.PointLight(0xff0f0f, 5, 5);
+		// pointLight.castShadow = true; // 影を落とす設定。（高負荷）
+
+		// 照明を可視化するヘルパー
+		// this.scene.add(new THREE.PointLightHelper(this.fireLight));
 
 		// boxグループを保存する配列
 		this.boxGroups = [];
 
-		const BOX_CT = 100;
-		const boxGeometry = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+		// const BOX_CT = 120;
+		const boxGeometry = new THREE.BoxGeometry(1.0, 0.5, 0.8);
 		// const group = new THREE.Group();
 
 		// 要素ごとの角度の増加値 θ[deg]
-		const INCREMENT_DEG = (360 * 2.5) / BOX_CT;
+		const INCREMENT_DEG = 1080 / this.BOX_CT;
 
 		// それを radian に変換 ( rad = deg * (π / 180) )
-		const INCREMENT_RAD = (INCREMENT_DEG * Math.PI) / 180;
+		const INCREMENT_RAD = getRadian(INCREMENT_DEG);
+
+		this.greenMaterial = new THREE.MeshStandardMaterial({
+			color: new THREE.Color('#35db29'),
+		});
+		this.redMaterial = new THREE.MeshPhongMaterial({
+			color: new THREE.Color('#ff6565'),
+		});
+		this.grayMaterial = new THREE.MeshPhongMaterial({
+			color: new THREE.Color('#ddd'),
+			shininess: 0,
+			wireframe: true,
+		});
 
 		// 蚊取り線香上にBOXを配置する
-		for (let i = 0; i < BOX_CT; i++) {
+		for (let i = 0; i < this.BOX_CT; i++) {
 			// Mesh生成 materialを個別に操作していきたいときは個別にmaterial定義しておかないといけないっぽい？
-			const mesh = new THREE.Mesh(
-				boxGeometry,
-				new THREE.MeshStandardMaterial({ color: i === 99 ? 0xff0000 : 0x66ee22 })
-			);
+			const theMaterial = i === this.BOX_CT - 1 ? this.redMaterial : this.greenMaterial;
+			const mesh = new THREE.Mesh(boxGeometry, theMaterial);
 
-			const offset_rad = 4; // 最初に映る蚊取り線香の向きを調整するためのオフセット
-			const _rad = offset_rad + (i * INCREMENT_RAD + (i - 20) * 0.02); // 中心は角度を広く、外側は角度を狭くする
-			const _r = 1 + 0.01 * i + i * 0.05; // なんかいい感じに渦が広がるように半径を調整
+			const start_rad = 0.8; // 最初に映る蚊取り線香の向きを調整するための初期角度
+			const base_rad = i * INCREMENT_RAD; // 基本の配置角度（個数で均等に割った値）
+
+			// this.BOX_CT/2 で 0 、それ以下で正の値、それ以上で負の方向へ増加
+			const offset_rad = (this.BOX_CT / 2 - i) * 0.001; // 20 個目より内側は角度間隔を広く、外側は角度を狭くする
+			console.log('offset_rad:' + offset_rad);
+			const _rad = start_rad + base_rad + offset_rad; // 20 個目より内側は角度間隔を広く、外側は角度を狭くする
+			console.log('_rad' + _rad);
+			const _r = 1 + i * 0.05; // なんかいい感じに渦が広がるように半径を調整
 
 			// 配置座標を 角度[rad] と 半径r から計算して配置
 			const x = _r * Math.cos(_rad);
 			const z = _r * Math.sin(_rad);
 			mesh.position.set(x, 0, z);
+			mesh.rotation.y = -_rad;
+			mesh.scale.z = 1.0 - (this.BOX_CT / 2 - i) * 0.005;
 
 			// グループに追加する
 			// group.add(mesh);
 			this.scene.add(mesh);
 			this.boxs.push(mesh);
+
+			// 最後の位置に合わせてライトを配置
+			this.fireLight.position.set(x, 0.2, z);
+			this.scene.add(this.fireLight);
 		}
 
 		// グループをシーンに追加する
 		// this.scene.add(group);
 
+		// 床
+		// PlaneGeometry
+		const plane = new THREE.Mesh(
+			new THREE.PlaneGeometry(100, 100),
+			new THREE.MeshPhongMaterial({
+				color: 0x333333,
+				transparent: true,
+				opacity: 0.5,
+			})
+		);
+		plane.position.set(0, -0.35, 0);
+		plane.rotation.x = getRadian(-90);
+		this.scene.add(plane);
+
 		// OrbitControls
 		this.controls = new OrbitControls(this.camera, this.renderer.domElement);
 
 		// 軸ヘルパー
-		// this.scene.add(new THREE.AxesHelper(5.0));
+		// this.scene.add(new THREE.AxesHelper(10.0));
 	}
 
 	/**
@@ -177,20 +228,20 @@ class App3 {
 		// 恒常ループの設定
 		requestAnimationFrame(this.render);
 
-		// タイマーが進むごとに色を変えていく
+		// タイマーが進むごとに色を変えていく（マテリアルの入れ替え）
 		if (null !== this.timerCash) {
-			console.log(this.timer);
 			this.timerCash = null;
-			const targetRed = this.boxs[99 - this.timer];
-			const targetGray = this.boxs[99 - this.timer + 1];
+			const targetRed = this.boxs[this.BOX_CT - this.timer - 1];
+			const targetGray = this.boxs[this.BOX_CT - this.timer];
 
 			if (targetRed) {
-				targetRed.material.color = new THREE.Color('red');
+				targetRed.material = this.redMaterial;
+
+				this.fireLight.position.set(targetRed.position.x, 0.2, targetRed.position.z);
 			}
 
 			if (targetGray) {
-				targetGray.material.color = new THREE.Color('#ccc');
-				targetGray.material.wireframe = true;
+				targetGray.material = this.grayMaterial;
 			}
 		}
 

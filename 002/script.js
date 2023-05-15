@@ -127,7 +127,7 @@ class App3 {
 		this.scene.add(directionalLight);
 
 		// アンビエントライト（環境光）
-		const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+		const ambientLight = new THREE.AmbientLight(0xeeeeee, 1.0);
 		this.scene.add(ambientLight);
 
 		// 点光源
@@ -153,7 +153,7 @@ class App3 {
 		const INCREMENT_RAD = getRadian(INCREMENT_DEG);
 
 		this.greenMaterial = new THREE.MeshStandardMaterial({
-			color: new THREE.Color('#35db29'),
+			color: new THREE.Color('#30ee20'),
 		});
 		this.redMaterial = new THREE.MeshPhongMaterial({
 			color: new THREE.Color('#ff6565'),

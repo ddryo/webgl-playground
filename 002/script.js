@@ -1,6 +1,7 @@
 // 必要なモジュールを読み込み
 import * as THREE from './lib/three.module.js';
 import { OrbitControls } from './lib/OrbitControls.js';
+import { getRadian } from './helper/getRadian.js';
 
 // DOM がパースされたことを検出するイベントを設定
 window.addEventListener(
@@ -15,10 +16,6 @@ window.addEventListener(
 	},
 	false
 );
-
-const getRadian = (deg) => {
-	return (deg * Math.PI) / 180;
-};
 
 /**
  * three.js を効率よく扱うために自家製の制御クラスを定義

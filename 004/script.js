@@ -1,18 +1,33 @@
 // 必要なモジュールを読み込み
-import * as THREE from './lib/three.module.js';
-import { OrbitControls } from './lib/OrbitControls.js';
+// import * as THREE from './lib/three.module.js';
+// 必要なモジュールを読み込み
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ポストプロセス用のファイル群を追加
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { RenderPixelatedPass } from 'three/addons/postprocessing/RenderPixelatedPass.js';
+import { FilmPass } from 'three/addons/postprocessing/FilmPass.js';
+// import { BloomPass } from 'three/addons/postprocessing/BloomPass.js';
+import { SepiaShader } from 'three/addons/shaders/SepiaShader.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+
+// 自作
 import { getRadian } from './helper/getRadian.js';
 
-// DOM がパースされたことを検出するイベントを設定
+// DOM がパースされたことを検出するイベントで App3 クラスをインスタンス化する
 window.addEventListener(
 	'DOMContentLoaded',
 	() => {
-		// 制御クラスのインスタンスを生成
 		const app = new App3();
-		// 初期化
-		app.init();
-		// 描画
-		app.render();
+
+		// 画像をロードしテクスチャを初期化する（Promise による非同期処理） @@@
+		app.load().then(() => {
+			// ロードが終わってから初期化し、描画する
+			app.init();
+			app.render();
+		});
 	},
 	false
 );
@@ -21,17 +36,21 @@ window.addEventListener(
  * three.js を効率よく扱うために自家製の制御クラスを定義
  */
 class App3 {
+	static TEXURES = {
+		floor: './texture/tatami_1024.jpg',
+		wall: './texture/wall_1024.jpg',
+	};
 	// カメラの設定
 	static get CAMERA_PARAM() {
 		return {
-			fovy: 80,
+			fovy: 60,
 			aspect: window.innerWidth / window.innerHeight,
 			near: 0.1,
-			far: 10.0,
-			x: -0.75,
-			y: 0.5,
-			z: 3,
-			lookAt: new THREE.Vector3(0.0, 0.0, 0.0),
+			far: 40.0,
+			x: 0,
+			y: 2,
+			z: 6,
+			lookAt: new THREE.Vector3(0.0, 2.0, 0.0),
 		};
 	}
 
@@ -45,17 +64,31 @@ class App3 {
 	}
 
 	// 扇風機の設定
-	static FAN_PARAM = {
-		COLOR: {
-			brade: 0xffffff,
-			wire: 0xcccccc,
-		},
-		BRADE_COUNT: 7, // ブレードの数
-		HEAD_R: 1, // ヘッド部分の半径
-		HEAD_DEPTH: 0.4, // ヘッド部分の奥行き
-		WIRE_R: 0.008, // ワイヤーの半径
-		NECK_LENGTH: 1,
-	};
+	static get FAN_PARAM() {
+		const HEAD_R = 1;
+		const HEAD_DEPTH = HEAD_R * 0.35;
+		const NECK_LENGTH = HEAD_R * 0.9;
+		// const NeckRotationAxis
+		const NECK_AXIS_Z = -NECK_LENGTH / 2.5 - HEAD_DEPTH / 2;
+		return {
+			COLOR: {
+				brade: 0xffffff,
+				wire: 0xeeeeee,
+			},
+			BRADE_COUNT: 7, // ブレードの数
+			HEAD_R, // ヘッド部分の半径
+			HEAD_DEPTH: HEAD_DEPTH, // ヘッド部分の奥行き
+			HEAD_Z: HEAD_DEPTH / 2,
+			NECK_R: HEAD_R / 3,
+			NECK_LENGTH: HEAD_R * 0.9,
+			POLE_R: HEAD_R / 6,
+			POLE_HEIGHT: HEAD_R * 3,
+			WIRE_R: HEAD_R * 0.008, // ワイヤーの半径
+			FOOT_R: HEAD_R * 1,
+			FOOT_HEIGHT: HEAD_R * 0.1,
+			NECK_AXIS_Z,
+		};
+	}
 
 	static get MATERIALS() {
 		return {
@@ -74,17 +107,21 @@ class App3 {
 	 * @constructor
 	 */
 	constructor() {
-		this.cameraRad = 0;
 		this.renderer; // レンダラ
 		this.scene; // シーン
 		this.camera; // カメラ
 		this.controls; // オービットコントロール
+		this.composer; // エフェクトコンポーザー @@@
+		this.renderPass; // レンダーパス @@@
+		this.glitchPass; // グリッチパス @@@
+		this.useComposer = 1;
+		this.texture = {
+			floor: null,
+			wall: null,
+		};
 
 		// 扇風機
-		this.fanGroup;
-		this.blades;
-
-		this.topGroup;
+		this.neckRotationFlag = false; // 首振り方向のフラグ
 
 		// 再帰呼び出しのための this 固定
 		this.render = this.render.bind(this);
@@ -99,6 +136,31 @@ class App3 {
 			},
 			false
 		);
+	}
+
+	/**
+	 * テクスチャのロード
+	 */
+	load() {
+		return new Promise((resolve) => {
+			const loadManager = new THREE.LoadingManager();
+			const loader = new THREE.TextureLoader(loadManager);
+
+			loader.load(App3.TEXURES.floor, (texture) => {
+				texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+				texture.repeat.set(2, 2);
+				this.texture.floor = texture;
+				// this.texture.floor.repeat.set(4, 4);
+			});
+			loader.load(App3.TEXURES.wall, (texture) => {
+				this.texture.wall = texture;
+			});
+
+			// 全部読み込みが終わったら resolve する
+			loadManager.onLoad = () => {
+				resolve();
+			};
+		});
 	}
 
 	/**
@@ -129,24 +191,63 @@ class App3 {
 		this.createHeadFront();
 		this.createHeadFrame();
 		this.createHeadBack();
-		this.fanGroup.add(this.headGroup);
+
+		// 首振りの回転軸を z = 0 に合わせる
+		this.headGroup.position.set(0, 0, -App3.FAN_PARAM.NECK_AXIS_Z);
+
+		// さらにグループをラップして首振りの回転軸の辻褄をあわせる
+		this.headGroupWrap = new THREE.Group();
+		this.headGroupWrap.add(this.headGroup);
+		this.fanGroup.add(this.headGroupWrap);
 
 		// body部分
 		this.bodyGroup = new THREE.Group();
-		this.createBody();
+		this.createStand();
 		this.fanGroup.add(this.bodyGroup);
+
+		// 扇風機の底を y=0 に合わせる
+		this.fanGroup.position.set(
+			0,
+			App3.FAN_PARAM.POLE_HEIGHT + App3.FAN_PARAM.FOOT_HEIGHT / 2,
+			0
+		);
 
 		// 扇風機全体のグループをシーンに追加
 		this.scene.add(this.fanGroup);
 
-		// キー操作できるようにグループを配列に保存しておく
-		// this.boxGroups.push({ group, perspective, r });
-
-		// OrbitControls
-		this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+		this.roomGroup = new THREE.Group();
+		this.createRoom();
+		this.scene.add(this.roomGroup);
 
 		// 軸ヘルパー
-		this.scene.add(new THREE.AxesHelper(5.0));
+		// this.scene.add(new THREE.AxesHelper(5.0));
+
+		// コンポーザーの設定 @@@
+		if (this.useComposer) {
+			// 1. コンポーザーにレンダラを渡して初期化する
+			this.composer = new EffectComposer(this.renderer);
+			// 2. コンポーザーに、まず最初に「レンダーパス」を設定する
+			this.renderPass = new RenderPass(this.scene, this.camera);
+			// this.composer.addPass(this.renderPass);
+
+			// RenderPixelatedPass使ってみる
+			const renderPixelatedPass = new RenderPixelatedPass(1, this.scene, this.camera, {
+				normalEdgeStrength: 0.1, // 0~2?
+				// depthEdgeStrength: 0.1, // 0~1?
+			});
+			this.composer.addPass(renderPixelatedPass);
+
+			const shaderSepia = SepiaShader;
+			const effectSepia = new ShaderPass(shaderSepia);
+			effectSepia.uniforms['amount'].value = 0.1;
+			this.composer.addPass(effectSepia);
+
+			// const effectBloom = new BloomPass(0.99, 4, 0.01, 1024);
+			// this.composer.addPass(effectBloom);
+
+			const effectFilm = new FilmPass(0.2, 0.25, 648, false);
+			this.composer.addPass(effectFilm);
+		}
 	}
 
 	/**
@@ -161,7 +262,12 @@ class App3 {
 			App3.CAMERA_PARAM.far
 		);
 		this.camera.position.set(App3.CAMERA_PARAM.x, App3.CAMERA_PARAM.y, App3.CAMERA_PARAM.z);
-		this.camera.lookAt(App3.CAMERA_PARAM.lookAt);
+		// this.camera.lookAt(App3.CAMERA_PARAM.lookAt);
+
+		// OrbitControls
+		this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+		this.controls.target = App3.CAMERA_PARAM.lookAt; // カメラ方向の初期値
+		this.controls.update();
 	}
 
 	/**
@@ -173,11 +279,11 @@ class App3 {
 		directionalLight.position.set(1.0, 1.0, 2.0); // xyzでベクトル指定
 
 		// アンビエントライト（環境光）
-		const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+		const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
 
 		// 点光源
-		const pointLight = new THREE.PointLight(0xbb99ee, 0.5, 50);
-		pointLight.position.set(0, 0, 0);
+		// const pointLight = new THREE.PointLight(0xbb99ee, 0.5, 50);
+		// pointLight.position.set(0, 0, 0);
 		// pointLight.castShadow = true; // 影を落とす設定。（高負荷）
 
 		// 各ライトをシーンに追加
@@ -210,7 +316,7 @@ class App3 {
 
 			const bradeGeometry = new THREE.RingGeometry(
 				bradeCenterR,
-				App3.FAN_PARAM.HEAD_R * 0.85,
+				App3.FAN_PARAM.HEAD_R * 0.9,
 				32,
 				0,
 				thetaStart,
@@ -314,11 +420,11 @@ class App3 {
 		// this.headFront = new THREE.Group();
 
 		// 前面部分のz座標
-		const FRONT_Z = App3.FAN_PARAM.HEAD_DEPTH / 2;
+		const HEAD_DEPTH = App3.FAN_PARAM.HEAD_DEPTH;
 
 		// ワイヤー部分
-		this.createCircleWires(4, FRONT_Z, this.headGroup, 2);
-		this.createLineWires(20, FRONT_Z, this.headGroup);
+		this.createCircleWires(4, HEAD_DEPTH / 2, this.headGroup, 2);
+		this.createLineWires(20, HEAD_DEPTH / 2, this.headGroup);
 
 		// 中央の部分
 		const centerMesh = new THREE.Mesh(
@@ -330,29 +436,42 @@ class App3 {
 			App3.MATERIALS.wire
 		);
 		centerMesh.rotation.x = getRadian(90);
-		centerMesh.position.set(0, 0, FRONT_Z);
+		centerMesh.position.set(0, 0, HEAD_DEPTH / 2);
 		this.headGroup.add(centerMesh);
 
 		// ヘッドグループに追加
 		// this.headGroup.add(this.headFront);
 	}
 
-	// ヘッド部分前面
+	// ヘッド背面
 	createHeadBack() {
 		// this.headBack = new THREE.Group();
 
-		const BACK_Z = -App3.FAN_PARAM.HEAD_DEPTH / 2;
+		const HEAD_DEPTH = App3.FAN_PARAM.HEAD_DEPTH;
 
 		// ワイヤー部分
-		this.createLineWires(5, BACK_Z, this.headGroup);
-		this.createCircleWires(10, BACK_Z, this.headGroup, 2);
+		this.createLineWires(5, -HEAD_DEPTH / 2, this.headGroup);
+		this.createCircleWires(10, -HEAD_DEPTH / 2, this.headGroup, 4);
+
+		// 中央の部分
+		// const centerMesh = new THREE.Mesh(
+		// 	new THREE.CylinderGeometry(
+		// 		App3.FAN_PARAM.NECK_R,
+		// 		App3.FAN_PARAM.NECK_R,
+		// 		App3.FAN_PARAM.WIRE_R * 2.5
+		// 	),
+		// 	App3.MATERIALS.wire
+		// );
+		// centerMesh.rotation.x = getRadian(90);
+		// centerMesh.position.set(0, 0, -HEAD_DEPTH / 2);
+		// this.headGroup.add(centerMesh);
 
 		// 首の部分
 		// const NECK_LENGTH = App3.FAN_PARAM.HEAD_DEPTH * 2.5;
 		const neckMesh = new THREE.Mesh(
 			new THREE.CylinderGeometry(
-				App3.FAN_PARAM.HEAD_R / 2.5,
-				App3.FAN_PARAM.HEAD_R / 2.5,
+				App3.FAN_PARAM.NECK_R,
+				App3.FAN_PARAM.NECK_R,
 				App3.FAN_PARAM.NECK_LENGTH
 			),
 			App3.MATERIALS.wire
@@ -361,7 +480,9 @@ class App3 {
 		neckMesh.position.set(
 			0,
 			0,
-			-(App3.FAN_PARAM.NECK_LENGTH / 2) - App3.FAN_PARAM.HEAD_DEPTH / 2
+			-(App3.FAN_PARAM.NECK_LENGTH / 2) -
+				App3.FAN_PARAM.HEAD_DEPTH / 2 +
+				App3.FAN_PARAM.WIRE_R
 		);
 		this.headGroup.add(neckMesh);
 
@@ -370,27 +491,70 @@ class App3 {
 	}
 
 	/**
-	 * ボディ
+	 * スタンド
 	 */
-	createBody() {
-		// this.bodyGroup.add(centerMesh);
+	createStand() {
+		const POLE_HEIGHT = App3.FAN_PARAM.POLE_HEIGHT;
 
-		const BODY_HEIGHT = App3.FAN_PARAM.NECK_LENGTH * 3;
-		const bodyMesh = new THREE.Mesh(
+		const poleMesh = new THREE.Mesh(
+			new THREE.CylinderGeometry(App3.FAN_PARAM.POLE_R, App3.FAN_PARAM.POLE_R, POLE_HEIGHT),
+			App3.MATERIALS.wire
+		);
+		poleMesh.position.set(0, -(POLE_HEIGHT / 2), 0);
+		this.bodyGroup.add(poleMesh);
+
+		// 台
+		// const App3.FAN_PARAM.POLE_HEIGHT = App3.FAN_PARAM.NECK_LENGTH * 3;
+		const footMesh = new THREE.Mesh(
 			new THREE.CylinderGeometry(
-				App3.FAN_PARAM.HEAD_R / 4,
-				App3.FAN_PARAM.HEAD_R / 4,
-				BODY_HEIGHT
+				App3.FAN_PARAM.FOOT_R,
+				App3.FAN_PARAM.FOOT_R * 0.95,
+				App3.FAN_PARAM.FOOT_HEIGHT
 			),
 			App3.MATERIALS.wire
 		);
-		bodyMesh.position.set(
-			0,
-			-(BODY_HEIGHT / 2),
-			-(App3.FAN_PARAM.NECK_LENGTH / 2) - App3.FAN_PARAM.HEAD_DEPTH / 2
+		footMesh.position.set(0, -POLE_HEIGHT, 0);
+
+		this.bodyGroup.add(footMesh);
+	}
+
+	/**
+	 * 部屋
+	 */
+	createRoom() {
+		this.roomGroup = new THREE.Group();
+		// 床
+		const floorMaterial = new THREE.MeshStandardMaterial({
+			color: 0xcccccc,
+			map: this.texture.floor,
+		});
+
+		const roomSize = 12;
+		const floorMesh = new THREE.Mesh(
+			new THREE.PlaneGeometry(roomSize, roomSize),
+			floorMaterial
 		);
-		// NECK_LENGTH
-		this.bodyGroup.add(bodyMesh);
+		floorMesh.position.set(0, 0, 0);
+		floorMesh.rotation.x = getRadian(-90);
+		this.roomGroup.add(floorMesh);
+
+		// 壁
+		const wallMaterial = new THREE.MeshStandardMaterial({
+			color: 0xcccccc,
+			map: this.texture.wall,
+		});
+
+		const wallMesh1 = new THREE.Mesh(new THREE.PlaneGeometry(roomSize, roomSize), wallMaterial);
+		wallMesh1.position.set(0, roomSize / 2, -roomSize / 2);
+		this.roomGroup.add(wallMesh1);
+
+		const wallMesh2 = new THREE.Mesh(new THREE.PlaneGeometry(roomSize, roomSize), wallMaterial);
+		wallMesh2.position.set(roomSize / 2, roomSize / 2, 0);
+		wallMesh2.rotation.y = getRadian(-90);
+		this.roomGroup.add(wallMesh2);
+
+		this.roomGroup.rotation.y = getRadian(45);
+		this.scene.add(this.roomGroup);
 	}
 
 	/**
@@ -403,9 +567,26 @@ class App3 {
 		// コントロールを更新 memo: なくても動いた
 		// this.controls.update();
 
-		this.blades.rotation.z += 0.01;
+		// 羽根の回転
+		this.blades.rotation.z += 0.2;
+
+		// 首振り制御
+		if (this.headGroupWrap.rotation.y > getRadian(45)) {
+			this.neckRotationFlag = false;
+		} else if (this.headGroupWrap.rotation.y < getRadian(-45)) {
+			this.neckRotationFlag = true;
+		}
+		if (this.neckRotationFlag) {
+			this.headGroupWrap.rotation.y += 0.002;
+		} else {
+			this.headGroupWrap.rotation.y -= 0.002;
+		}
 
 		// レンダラーで描画
-		this.renderer.render(this.scene, this.camera);
+		if (this.useComposer) {
+			this.composer.render();
+		} else {
+			this.renderer.render(this.scene, this.camera);
+		}
 	}
 }
